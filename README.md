@@ -17,7 +17,7 @@ The library `trovis-modbus`:
 - provides the auto-discovery and auto-configuration logic required to determine the controller model and its capabilities, the configured hydronic system, the sensor and input assignments, and the relevant controller functions, parameters, and configuration settings.
 - contains the controller-specific data model. It knows the available
 registers and coils, their data types and metadata, and the rules required for safe reads and writes.
-- does _NOT_ create or own the Modbus transport. Applications utilizing the library provide a [`modbus_connection.ModbusUnit`](https://github.com/home-assistant-libs/modbus-connection) and may use any backend supported by `modbus-connection` (pymodbus, tmodbus, ...). Since `modbus-connection` 4.0 a connection manages its own link: it connects on demand and re-establishes itself after a drop, over the same unit handle. An application does not have to rebuild the `Trovis557x` object (nor, in Home Assistant, reload its config entry) when the link goes down.
+- does _NOT_ create or own the Modbus transport. Applications utilizing the library provide a [`modbus_connection.ModbusUnit`](https://github.com/home-assistant-libs/modbus-connection) and may use any backend supported by `modbus-connection` (pymodbus, tmodbus, ...).
 
 ## Data provided by the library
 
