@@ -88,7 +88,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def _connection(args: argparse.Namespace) -> ModbusConnection:
     """Build the connection described by the arguments. Performs no I/O."""
     # Imported here so the module loads (and --help works) without a backend.
-    from modbus_connection.pymodbus import PymodbusConnection
+    from modbus_connection.pymodbus import ModbusConnection as PymodbusConnection
 
     if args.transport == "serial":
         return PymodbusConnection(
@@ -156,14 +156,18 @@ def _print(device: Trovis557x) -> None:
 
 
 async def _run(args: argparse.Namespace) -> int:
+    # Constructing the connection performs no I/O; a request would establish the
+    # link on its own. This one-shot dump connects eagerly anyway, to tell a
+    # connect failure apart from a device that answers but refuses a read.
     connection = _connection(args)
-    try:
-        await connection.connect()
-    except ModbusError as err:
-        print(f"Could not connect: {err}", file=sys.stderr)
-        return 1
     counting = CountingUnit(connection.for_unit(args.unit))
     try:
+        try:
+            await connection.connect()
+        except ModbusError as err:
+            print(f"Could not connect: {err}", file=sys.stderr)
+            return 1
+
         probe = await Trovis557x.async_probe(counting)
         device = Trovis557x(
             counting,
