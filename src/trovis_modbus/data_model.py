@@ -819,6 +819,7 @@ class TrovisComponent(Component):
 
         if descriptor.scale_register is None:
             return True
+
         return is_span_readable(self._scale_address(descriptor), 1, register_ranges)
 
     @property
