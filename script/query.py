@@ -88,7 +88,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def _connection(args: argparse.Namespace) -> ModbusConnection:
     """Build the connection described by the arguments. Performs no I/O."""
     # Imported here so the module loads (and --help works) without a backend.
-    from modbus_connection.pymodbus import ModbusConnection as PymodbusConnection
+    from modbus_connection.pymodbus import PymodbusConnection
 
     if args.transport == "serial":
         return PymodbusConnection(
