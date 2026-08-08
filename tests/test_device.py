@@ -5,7 +5,11 @@ from __future__ import annotations
 from datetime import date, time
 
 import pytest
-from modbus_connection import ClientClosedError, GatewayTargetError
+from modbus_connection import (
+    ClientClosedError,
+    GatewayTargetError,
+    IllegalDataAddressError,
+)
 from modbus_connection.mock import MockModbusConnection, MockModbusUnit
 
 from trovis_modbus import (
@@ -190,6 +194,25 @@ async def test_consolidated_reads_decode_correctly(unit: MockModbusUnit) -> None
     assert device.sensors.vf1 == pytest.approx(30.0)
     assert device.sensors.vf2 == pytest.approx(31.0)
     assert device.sensors.vf3 == pytest.approx(32.0)
+
+
+async def test_a_refused_block_reports_which_block_was_refused(
+    trovis: Trovis557x, unit: MockModbusUnit
+) -> None:
+    """A controller refusing a planned block names the block, not just the code."""
+    # VF1, in the middle of the pooled sensor block rather than at its start.
+    unit.fail_read(12, IllegalDataAddressError())
+
+    with pytest.raises(IllegalDataAddressError) as refusal:
+        await trovis.async_update()
+
+    block = refusal.value.block
+    assert block is not None
+    assert block.space == "holding"
+    assert block.address <= 12 < block.address + block.count
+    # The update applied nothing, so no sub-system holds a half-read value.
+    assert trovis.sensors.vf1 is None
+    assert trovis.rk1.flow_setpoint is None
 
 
 async def test_update_survives_a_dropped_connection() -> None:
