@@ -5,7 +5,10 @@ Definitions use manufacturer references:
 - holding-register references such as HR40102
 - coil references such as CL137
 
-Known gaps and manufacturer block boundaries are preserved intentionally.
+Known gaps are preserved intentionally: an address no range claims is what keeps
+a pooled read off it. Manufacturer block boundaries between touching ranges are
+kept for traceability only — a read may span them, so a boundary that must not
+be crossed has to be a real gap or fit under ``max_span``.
 """
 
 from __future__ import annotations

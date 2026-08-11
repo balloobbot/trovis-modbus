@@ -803,9 +803,12 @@ class TrovisComponent(Component):
         filter removes unsupported logical views that share an otherwise valid
         address, for example model-specific sensor aliases.
 
-        ``Component.restrict_fields`` cannot stand in for this: it also carves
-        every dropped field's addresses out of the readable ranges, which would
-        make the surviving alias of a shared register unplannable.
+        ``Component.restrict_fields`` still cannot stand in for this. It carves
+        the dropped fields' addresses out of the component's readable ranges,
+        which is an availability statement this filter does not make: a sensor
+        a model does not expose is a missing logical view, not an address the
+        controller refuses. The narrowed map then disagrees with the identical
+        one its sibling components declare, and pooling them raises.
         """
         allowed = frozenset(field_names)
         self._apply_read_layout(
