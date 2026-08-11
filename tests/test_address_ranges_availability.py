@@ -49,11 +49,11 @@ async def test_every_supported_model_plans_inside_its_ranges(
 async def test_every_supported_model_reads_only_inside_its_ranges(
     mock_modbus_unit,
 ) -> None:
-    """No pooled block of any model covers an address its profile omits.
+    """Every pooled block of every model stays inside one declared range.
 
-    Touching ranges describe one readable run, so a block may span the
-    manufacturer boundary between them. Only a real gap keeps a read out, and
-    that is what this asserts, per model, for both spaces.
+    Pooling keeps every boundary the profile draws, so a block never bridges a
+    gap and never spans the manufacturer boundary between two touching ranges.
+    Asserted per model, for both spaces.
     """
     from trovis_modbus import Trovis557x
     from trovis_modbus.data_model import TrovisComponent
@@ -68,16 +68,12 @@ async def test_every_supported_model_reads_only_inside_its_ranges(
         assert mock_modbus_unit.read_events
         for event in mock_modbus_unit.read_events:
             assert event.count <= TrovisComponent.max_span
-            assert all(
-                any(
-                    low <= address <= high
-                    for low, high in declared[event.register_type]
-                )
-                for address in range(event.address, event.address + event.count)
+            assert is_span_readable(
+                event.address, event.count, declared[event.register_type]
             ), (
                 f"model {model}: {event.register_type} block "
                 f"{event.address}..{event.address + event.count - 1} "
-                "covers an address outside the model profile"
+                "is not contained in one range of the model profile"
             )
 
 
