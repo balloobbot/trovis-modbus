@@ -143,5 +143,5 @@ class Sensors(TrovisComponent):
     def detected_sensor_names(self) -> tuple[str, ...]:
         """Return sensor fields that currently have a valid value."""
         return tuple(
-            name for name in self._register_fields if getattr(self, name) is not None
+            name for name in self.resolved_fields if getattr(self, name) is not None
         )

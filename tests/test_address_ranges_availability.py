@@ -5,6 +5,7 @@ from __future__ import annotations
 from trovis_modbus.configurations.address_ranges import (
     COIL_RANGES_3_RK,
     REGISTER_RANGES_3_RK,
+    SUPPORTED_MODELS,
     control_circuit_count,
     is_span_readable,
     ranges_for_model,
@@ -27,18 +28,40 @@ def test_extended_model_raw_values_use_family_ranges() -> None:
     assert control_circuit_count(55731) == 2
 
 
-def test_ranges_must_be_configured_before_read_layout(
+async def test_every_supported_model_plans_inside_its_ranges(
     mock_modbus_unit,
 ) -> None:
+    """Every model's read layout survives the planner's readable-range check.
+
+    ``modbus-connection`` refuses to plan a field (or scale register) the
+    declared map cannot contain, so a profile that keeps an unreadable field
+    fails here at plan time rather than on a real controller.
+    """
+    from trovis_modbus import Trovis557x
+
+    for model in sorted(SUPPORTED_MODELS):
+        device = Trovis557x(mock_modbus_unit, model=model)
+        await device.async_update()  # pooled; raises ValueError on a misfit
+        for component in device.components:
+            await component.async_update()  # and standalone, per component
+
+
+async def test_ranges_can_be_narrowed_after_the_first_read(
+    mock_modbus_unit,
+) -> None:
+    """A later range profile re-plans the reads and drops what it excluded."""
     from trovis_modbus import Functions
 
     functions = Functions(mock_modbus_unit)
-    _ = functions._read_items  # build and cache the read layout
+    await functions.async_update()  # builds and caches the read layout
+    assert functions.is_field_readable("input_12_is_binary")
+    assert functions.input_12_is_binary is False
 
-    register_ranges, coil_ranges = ranges_for_model(5578)
-    try:
-        functions.configure_readable_ranges(register_ranges, coil_ranges)
-    except RuntimeError as err:
-        assert "before the first read layout" in str(err)
-    else:
-        raise AssertionError("late range configuration must fail")
+    # The two-Rk profile serves CL801/CL802 only, so CL812 goes away.
+    functions.configure_readable_ranges(*ranges_for_model(5573))
+
+    assert not functions.is_field_readable("input_12_is_binary")
+    assert functions.input_12_is_binary is None
+    await functions.async_update()
+    assert functions.input_12_is_binary is None
+    assert functions.input_02_is_binary is False

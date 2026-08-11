@@ -9,7 +9,9 @@ from typing import Any
 
 from modbus_connection import ModbusError
 from modbus_connection.model import (
+    CoilField,
     Component,
+    DiscreteInputField,
     RegisterField,
     coil as _modbus_coil,
     enum as _modbus_enum,
@@ -744,17 +746,27 @@ class TrovisComponent(Component):
     # coil instead of being written to the corresponding holding register.
     ebene_autark_values: dict[str, Any] = {"mode": OperatingMode.AUTOMATIC}
 
-    def _ensure_read_layout_is_configurable(self) -> None:
-        """Reject availability changes after the read layout was built."""
-        cached_layout = {"_read_items"} & self.__dict__.keys()
-        if self.__dict__.get("_plan") is not None:
-            cached_layout.add("_plan")
-        if cached_layout:
-            names = ", ".join(sorted(cached_layout))
-            raise RuntimeError(
-                "read availability must be configured before the first read "
-                f"layout is built (already cached: {names})"
-            )
+    def _apply_read_layout(
+        self,
+        register_fields: dict[str, RegisterField[Any]],
+        bit_fields: dict[str, CoilField | DiscreteInputField],
+    ) -> None:
+        """Install a narrowed read layout and re-plan the reads that feed it.
+
+        ``modbus-connection`` invalidates a component's cached plan up through
+        the ``ComponentGroup`` it is pooled in, so availability may be narrowed
+        before or after the first update. A value already read for a removed
+        field goes with it, so the field reads as ``None`` either way.
+        """
+        removed = (set(self._register_fields) - set(register_fields)) | (
+            set(self._bit_fields) - set(bit_fields)
+        )
+        self._register_fields = register_fields
+        self._bit_fields = bit_fields
+        for name in removed:
+            self._values.pop(name, None)
+            self._bits.pop(name, None)
+        self._invalidate_caches()
 
     def configure_readable_ranges(
         self,
@@ -762,27 +774,27 @@ class TrovisComponent(Component):
         coil_ranges: tuple[tuple[int, int], ...],
     ) -> None:
         """Keep only fields whose complete spans are readable for the model."""
-        self._ensure_read_layout_is_configurable()
         self.register_ranges = register_ranges
         self.coil_ranges = coil_ranges
 
         declared_registers = type(self)._register_fields
-        self._register_fields = {
-            name: descriptor
-            for name, descriptor in declared_registers.items()
-            if self._register_field_is_readable(descriptor, register_ranges)
-        }
-
         declared_bits = type(self)._bit_fields
-        self._bit_fields = {
-            name: descriptor
-            for name, descriptor in declared_bits.items()
-            if is_span_readable(
-                self._address(descriptor),
-                getattr(descriptor, "count", 1),
-                coil_ranges,
-            )
-        }
+        self._apply_read_layout(
+            {
+                name: descriptor
+                for name, descriptor in declared_registers.items()
+                if self._register_field_is_readable(descriptor, register_ranges)
+            },
+            {
+                name: descriptor
+                for name, descriptor in declared_bits.items()
+                if is_span_readable(
+                    self._address(descriptor),
+                    getattr(descriptor, "count", 1),
+                    coil_ranges,
+                )
+            },
+        )
 
     def configure_readable_fields(self, field_names: Iterable[str]) -> None:
         """Limit one component instance to a declared set of field names.
@@ -790,19 +802,24 @@ class TrovisComponent(Component):
         Ranges remain the coarse address-availability map. This optional second
         filter removes unsupported logical views that share an otherwise valid
         address, for example model-specific sensor aliases.
+
+        ``Component.restrict_fields`` cannot stand in for this: it also carves
+        every dropped field's addresses out of the readable ranges, which would
+        make the surviving alias of a shared register unplannable.
         """
-        self._ensure_read_layout_is_configurable()
         allowed = frozenset(field_names)
-        self._register_fields = {
-            name: descriptor
-            for name, descriptor in self._register_fields.items()
-            if name in allowed
-        }
-        self._bit_fields = {
-            name: descriptor
-            for name, descriptor in self._bit_fields.items()
-            if name in allowed
-        }
+        self._apply_read_layout(
+            {
+                name: descriptor
+                for name, descriptor in self._register_fields.items()
+                if name in allowed
+            },
+            {
+                name: descriptor
+                for name, descriptor in self._bit_fields.items()
+                if name in allowed
+            },
+        )
 
     def _register_field_is_readable(
         self,
@@ -825,11 +842,11 @@ class TrovisComponent(Component):
     @property
     def readable_field_names(self) -> frozenset[str]:
         """Return fields selected by the current model's range profile."""
-        return frozenset((*self._register_fields, *self._bit_fields))
+        return frozenset(self.resolved_fields)
 
     def is_field_readable(self, field: str) -> bool:
         """Return whether ``field`` is part of this instance's read layout."""
-        return field in self._register_fields or field in self._bit_fields
+        return field in self.resolved_fields
 
     def metadata_for(self, field: str) -> DatapointMetadata | None:
         """Return neutral TROVIS metadata for a declared field."""

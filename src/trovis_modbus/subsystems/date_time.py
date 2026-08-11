@@ -63,14 +63,14 @@ class Clock(TrovisComponent):
             await super().write(field, value)
             return
 
-        descriptor = self._register_fields[field]
-        raw_date, year = descriptor.encode(value)
-        address = self._address(descriptor)
+        # resolved_fields reports where the field actually lands on the device.
+        resolved = self.resolved_fields[field]
+        raw_date, year = resolved.field.encode(value)
 
         # 55Pro writes the year first and DDMM afterwards. Keep that proven
         # sequence instead of relying on one FC16 request across both words.
-        await self._unit.write_register(address + 1, year)
-        await self._unit.write_register(address, raw_date)
+        await self._unit.write_register(resolved.address + 1, year)
+        await self._unit.write_register(resolved.address, raw_date)
 
     async def set_time(self, value: datetime.time) -> None:
         """Set the controller clock time at minute resolution."""
