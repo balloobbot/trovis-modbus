@@ -39,6 +39,16 @@ The exact datapoints available on a device depend on the controller model, the
 selected hydronic system, active functions and parameters, and the sensor and
 input assignments configured for the connected physical sensors.
 
+## Partial updates
+
+A poll reads each sub-system independently, so one slow or refused block does not take the rest of the poll with it. `async_update()` returns an `UpdateReport` — a failed sub-system keeps its previous values, does not notify its listeners, and is listed by attribute name with the error that failed it, while every other sub-system refreshes and notifies once the whole poll is done. Only a dead link (`ModbusConnectionError`) raises:
+
+```python
+report = await device.async_update()
+for name, error in report.failed.items():
+    print(f"{name} kept its previous values: {error}")
+```
+
 ## Supported controllers
 
 | Controller                | Rk1-Rk3 / Heating | Rk4 / DHW | Hydronic systems | Comments                             |
