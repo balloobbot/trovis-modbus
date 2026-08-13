@@ -49,6 +49,10 @@ for name, error in report.failed.items():
     print(f"{name} kept its previous values: {error}")
 ```
 
+## Raw register dump
+
+`async_read_raw()` reads every register the device polls and returns them undecoded, `{space: {address: value}}` — the payload a Home Assistant diagnostics download wants, and one that replays straight into the mock backend for a regression test. Identity comes along: the model register lives in `info`, which is polled like any other sub-system.
+
 ## Supported controllers
 
 | Controller                | Rk1-Rk3 / Heating | Rk4 / DHW | Hydronic systems | Comments                             |

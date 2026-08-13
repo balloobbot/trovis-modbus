@@ -453,6 +453,19 @@ class Trovis557x:
             fresh.notify()
         return UpdateReport(updated, failed)
 
+    async def async_read_raw(self) -> dict[str, dict[int, int | bool]]:
+        """Every register this device reads, undecoded, for diagnostics.
+
+        The polled subsystems are the whole map: identity sits in ``info``,
+        which the poll reads like any other subsystem, and ``async_probe``
+        reads nothing beyond ``info`` and ``sensors``.
+        """
+        raw: dict[str, dict[int, int | bool]] = {}
+        for component in self.components:
+            for space, values in (await component.async_read_raw()).items():
+                raw.setdefault(space, {}).update(values)
+        return raw
+
     async def async_read_writing_enabled(self) -> bool:
         """Read the current write-enabled state directly from the controller."""
         return await async_read_writing_enabled(self._unit)

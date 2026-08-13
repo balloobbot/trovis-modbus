@@ -200,6 +200,20 @@ async def test_consolidated_reads_decode_correctly(unit: MockModbusUnit) -> None
     assert device.sensors.vf3 == pytest.approx(32.0)
 
 
+async def test_raw_dump_covers_what_setup_read(trovis: Trovis557x) -> None:
+    """A diagnostics dump must carry the setup registers, not just polled ones.
+
+    ``async_probe`` reads the model register and the sensor block; both belong
+    to polled sub-systems, so walking the poll list already covers them.
+    """
+    raw = await trovis.async_read_raw()
+
+    assert raw["holding"][0] == HOLDING[0]  # model, read by async_probe
+    assert raw["holding"][9] == HOLDING[9]  # af1, in async_probe's sensor block
+    assert raw["holding"][999] == HOLDING[999]  # an ordinary polled value
+    assert raw["coil"]  # and the bit spaces come along
+
+
 async def test_a_refused_block_reports_which_block_was_refused(
     trovis: Trovis557x, unit: MockModbusUnit
 ) -> None:
