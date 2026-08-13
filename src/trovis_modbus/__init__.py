@@ -61,7 +61,7 @@ from .subsystems import (
     Sensors,
     SolarCircuit,
 )
-from .trovis import Trovis557x
+from .trovis import Trovis557x, UpdateReport
 from .utils import (
     OUTDOOR_TEMPERATURES,
     MonthDay,
@@ -100,6 +100,7 @@ __all__ = [
     "ResolvedSensorVariant",
     "StorageStatus",
     "Trovis557x",
+    "UpdateReport",
     "VolumeUnit",
     "Weekday",
     "heating_curve",

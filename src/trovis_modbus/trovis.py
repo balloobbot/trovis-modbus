@@ -6,7 +6,8 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from modbus_connection.model import Component, ComponentGroup
+from modbus_connection import ModbusConnectionError, ModbusError
+from modbus_connection.model import Component
 
 from .addresses import register_address
 from .configurations.address_ranges import (
@@ -49,6 +50,43 @@ from .subsystems import (
 
 if TYPE_CHECKING:
     from modbus_connection import ModbusUnit
+
+# Every subsystem attribute a poll may refresh, in read order.
+_POLLED = (
+    "info",
+    "controller",
+    "clock",
+    "functions",
+    "parameters",
+    "sensors",
+    "rk1",
+    "rk2",
+    "rk3",
+    "rk4",
+    "buffer_tank",
+    "solar",
+)
+
+# Rk slots the model may not have; the rest are polled on every model.
+_CIRCUIT_SLOTS = ("rk1", "rk2", "rk3")
+
+
+@dataclass(frozen=True)
+class UpdateReport:
+    """What one poll refreshed, by the device's subsystem attribute names.
+
+    A failed subsystem kept its previous values and did not notify; the error
+    that failed it rides along. A dead link is never in here — the update
+    raises ``ModbusConnectionError`` instead of reporting partial silence.
+    """
+
+    updated: set[str]
+    failed: dict[str, ModbusError]
+
+    @property
+    def complete(self) -> bool:
+        """Whether every polled subsystem refreshed."""
+        return not self.failed
 
 
 @dataclass(frozen=True)
@@ -129,13 +167,15 @@ class Trovis557x:
         # limits logical sensor views that may share one readable register.
         self.sensors.configure_readable_fields(self.model_definition.sensor_keys)
 
+        circuit_count = control_circuit_count(model)
         self._control_circuits = (
             self.rk1,
             self.rk2,
             self.rk3,
-        )[: control_circuit_count(model)]
+        )[:circuit_count]
 
-        self._group = ComponentGroup(unit, self.components)
+        absent = frozenset(_CIRCUIT_SLOTS[circuit_count:])
+        self._polled = [name for name in _POLLED if name not in absent]
 
     @classmethod
     async def async_probe(cls, unit: ModbusUnit) -> TrovisProbe:
@@ -310,18 +350,7 @@ class Trovis557x:
     @property
     def components(self) -> tuple[Component, ...]:
         """Return every actively polled subsystem."""
-        return (
-            self.info,
-            self.controller,
-            self.clock,
-            self.functions,
-            self.parameters,
-            self.sensors,
-            *self.control_circuits,
-            self.rk4,
-            self.buffer_tank,
-            self.solar,
-        )
+        return tuple(getattr(self, name) for name in self._polled)
 
     @property
     def sensor_variant_resolution(self) -> SensorVariantResolution:
@@ -398,9 +427,31 @@ class Trovis557x:
         """Whether writing is enabled by the integration safety switch."""
         return self._writing_enabled
 
-    async def async_update(self) -> None:
-        """Refresh all active subsystems in pooled Modbus reads."""
-        await self._group.async_update()
+    async def async_update(self) -> UpdateReport:
+        """Refresh every active subsystem, one at a time.
+
+        Subsystems are read independently: one whose block the controller
+        refuses or answers too slowly keeps its previous values while the rest
+        still refresh. Listeners fire only after every subsystem has been
+        tried, and only on the ones that refreshed. A failure of the link
+        itself raises ``ModbusConnectionError`` instead of reporting.
+        """
+        updated: set[str] = set()
+        failed: dict[str, ModbusError] = {}
+        for name in self._polled:
+            component: Component = getattr(self, name)
+            try:
+                await component.async_update(notify=False)
+            except ModbusConnectionError:
+                raise
+            except ModbusError as err:
+                failed[name] = err
+            else:
+                updated.add(name)
+        for name in updated:
+            fresh: Component = getattr(self, name)
+            fresh.notify()
+        return UpdateReport(updated, failed)
 
     async def async_read_writing_enabled(self) -> bool:
         """Read the current write-enabled state directly from the controller."""

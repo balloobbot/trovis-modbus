@@ -142,13 +142,17 @@ async def test_independent_component_update(trovis: Trovis557x) -> None:
 async def test_full_update_consolidates_reads(
     trovis: Trovis557x, unit: MockModbusUnit
 ) -> None:
-    """A full device update pools all sub-systems into a few block reads."""
+    """A full device update pools each sub-system into a few block reads."""
     field_count = sum(len(c.readable_field_names) for c in trovis.components)
     await trovis.async_update()
 
     # Many fields collapse into a small number of range-aware block reads — far
     # fewer than the field count, and well under a naive per-field strategy.
-    assert len(unit.read_events) < field_count // 4
+    # Pooling stops at the sub-system boundary so that one refused block cannot
+    # blank the others; that split 35 merged blocks into 67, and dropped the
+    # handful of addresses no component wanted that the cross-component merges
+    # had been dragging in.
+    assert len(unit.read_events) < field_count // 3
 
     # The exact number of blocks may change when manufacturer ranges or the
     # planner improve. The stable safety guarantee is the configured max_span.
@@ -203,16 +207,18 @@ async def test_a_refused_block_reports_which_block_was_refused(
     # VF1, in the middle of the pooled sensor block rather than at its start.
     unit.fail_read(12, IllegalDataAddressError())
 
-    with pytest.raises(IllegalDataAddressError) as refusal:
-        await trovis.async_update()
+    report = await trovis.async_update()
 
-    block = refusal.value.block
+    refusal = report.failed["sensors"]
+    assert isinstance(refusal, IllegalDataAddressError)
+    block = refusal.block
     assert block is not None
     assert block.space == "holding"
     assert block.address <= 12 < block.address + block.count
-    # The update applied nothing, so no sub-system holds a half-read value.
+    # The refused sub-system applied nothing, so it holds no half-read value.
     assert trovis.sensors.vf1 is None
-    assert trovis.rk1.flow_setpoint is None
+    # The refusal is contained: every other sub-system still refreshed.
+    assert trovis.rk1.flow_setpoint == pytest.approx(55.0)
 
 
 async def test_update_survives_a_dropped_connection() -> None:

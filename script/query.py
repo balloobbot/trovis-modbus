@@ -172,13 +172,17 @@ async def _run(args: argparse.Namespace) -> int:
             detected_sensors=probe.detected_sensors,
         )
         start = time.monotonic()
-        await device.async_update()
+        report = await device.async_update()
         elapsed = time.monotonic() - start
     except ModbusError as err:
         print(f"Error reading device: {err}", file=sys.stderr)
         return 1
     finally:
         await connection.close()
+
+    for name, error in sorted(report.failed.items()):
+        print(f"{name}: kept previous values, read failed: {error}", file=sys.stderr)
+
     _print(device)
     print(f"\nQueried in {elapsed * 1000:.0f} ms ({counting.reads} Modbus reads)")
     return 0
