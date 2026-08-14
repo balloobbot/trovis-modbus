@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 from modbus_connection import (
+    IllegalDataAddressError,
     ModbusConnectionError,
     ModbusTimeoutError,
 )
@@ -74,6 +75,28 @@ async def test_one_circuit_failing_leaves_the_others_fresh(
     assert set(report.failed) == {"rk1"}
     assert {"rk2", "rk3", "rk4"} <= report.updated
     assert trovis.rk2.flow_setpoint == pytest.approx(48.0)
+
+
+async def test_a_silent_controller_raises_on_the_first_subsystem(
+    trovis: Trovis557x, unit: MockModbusUnit
+) -> None:
+    """Nothing answered, so the rest would only pay a timeout each."""
+    unit.fail_read(0, ModbusTimeoutError("controller asleep"))
+
+    with pytest.raises(ModbusTimeoutError):
+        await trovis.async_update()
+
+
+async def test_a_refusal_on_the_first_subsystem_is_not_a_silent_controller(
+    trovis: Trovis557x, unit: MockModbusUnit
+) -> None:
+    """An exception response proves the controller is there, so the poll goes on."""
+    unit.fail_read(0, IllegalDataAddressError("no identity block"))
+
+    report = await trovis.async_update()
+
+    assert set(report.failed) == {"info"}
+    assert {"sensors", "rk1"} <= report.updated
 
 
 async def test_a_dead_link_raises_instead_of_reporting(

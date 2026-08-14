@@ -6,7 +6,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from modbus_connection import ModbusConnectionError, ModbusError
+from modbus_connection import ModbusConnectionError, ModbusError, ModbusTimeoutError
 from modbus_connection.model import Component
 
 from .addresses import register_address
@@ -434,7 +434,9 @@ class Trovis557x:
         refuses or answers too slowly keeps its previous values while the rest
         still refresh. Listeners fire only after every subsystem has been
         tried, and only on the ones that refreshed. A failure of the link
-        itself raises ``ModbusConnectionError`` instead of reporting.
+        itself raises ``ModbusConnectionError`` instead of reporting, and a
+        timeout with nothing answered yet raises rather than walk a silent
+        controller subsystem by subsystem.
         """
         updated: set[str] = set()
         failed: dict[str, ModbusError] = {}
@@ -444,6 +446,10 @@ class Trovis557x:
                 await component.async_update(notify=False)
             except ModbusConnectionError:
                 raise
+            except ModbusTimeoutError as err:
+                if not updated and not failed:
+                    raise  # the first block timed out: assume the rest do too
+                failed[name] = err
             except ModbusError as err:
                 failed[name] = err
             else:
