@@ -459,10 +459,12 @@ class Trovis557x:
         The polled subsystems are the whole map: identity sits in ``info``,
         which the poll reads like any other subsystem, and ``async_probe``
         reads nothing beyond ``info`` and ``sensors``.
+
+        A dump is not a poll, so it refreshes the fields without notifying.
         """
         raw: dict[str, dict[int, int | bool]] = {}
         for component in self.components:
-            for space, values in (await component.async_read_raw()).items():
+            for space, values in (await component.async_read_raw(notify=False)).items():
                 raw.setdefault(space, {}).update(values)
         return raw
 

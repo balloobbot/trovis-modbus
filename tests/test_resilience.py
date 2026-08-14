@@ -55,6 +55,27 @@ async def test_listeners_fire_at_the_end_and_only_for_fresh_subsystems(
     assert seen == [len(unit.read_events)]
 
 
+async def test_one_circuit_failing_leaves_the_others_fresh(
+    trovis: Trovis557x, unit: MockModbusUnit
+) -> None:
+    """Why the Rk circuits are not pooled into one ``ComponentGroup``.
+
+    They do tile one short run — the mode/control-signal registers and the
+    status coils step by circuit — but each circuit also owns a 44-register
+    parameter block of its own at 41000 + 200 * i that no other circuit reads.
+    Pooling would put those private blocks in one plan, so a controller
+    refusing Rk1's parameters would blank Rk2, Rk3 and Rk4 as well.
+    """
+    await trovis.async_update()
+    unit.fail_read(999, ModbusTimeoutError("Rk1 parameter block"))
+
+    report = await trovis.async_update()
+
+    assert set(report.failed) == {"rk1"}
+    assert {"rk2", "rk3", "rk4"} <= report.updated
+    assert trovis.rk2.flow_setpoint == pytest.approx(48.0)
+
+
 async def test_a_dead_link_raises_instead_of_reporting(
     trovis: Trovis557x, unit: MockModbusUnit
 ) -> None:

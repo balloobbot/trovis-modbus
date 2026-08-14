@@ -214,6 +214,18 @@ async def test_raw_dump_covers_what_setup_read(trovis: Trovis557x) -> None:
     assert raw["coil"]  # and the bit spaces come along
 
 
+async def test_raw_dump_does_not_notify(trovis: Trovis557x) -> None:
+    """A diagnostics download must not look like a poll to a listener."""
+    await trovis.async_update()
+    calls: list[int] = []
+    trovis.rk1.add_update_listener(lambda: calls.append(1))
+
+    await trovis.async_read_raw()
+
+    assert calls == []
+    assert trovis.rk1.flow_setpoint == pytest.approx(55.0)  # still refreshed
+
+
 async def test_a_refused_block_reports_which_block_was_refused(
     trovis: Trovis557x, unit: MockModbusUnit
 ) -> None:
