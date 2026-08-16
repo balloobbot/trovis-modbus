@@ -49,6 +49,17 @@ for name, error in report.failed.items():
     print(f"{name} kept its previous values: {error}")
 ```
 
+## Reading settings apart from measurements
+
+What the controller measures and what it was configured with refresh separately. `async_update_readings()` reads the sensor inputs, the control-circuit operating values, the pump and valve states, the faults and the clock. `async_update_settings()` reads the CO/F selectors and PA values this library interprets those with — 10 of the poll's 70 blocks, nine of them small coil reads, for values that change only when someone reconfigures the controller. `async_update()` still does both, in one report, for a caller that does not want to schedule them apart.
+
+```python
+await device.async_update_settings()  # at setup, and after a reconfiguration
+await device.async_update_readings()  # every cycle
+```
+
+The settings are what the sensor-variant resolution and the heating-circuit control modes are derived from, so a caller that splits the two must run `async_update_settings()` at least once before those properties mean anything. Listeners fire at the end of the poll that read their sub-system, so a settings poll does not hold up the measurements, and a report names only what the method it came from polls.
+
 ## Raw register dump
 
 `async_read_raw()` reads every register the device polls and returns them undecoded, `{space: {address: value}}` — the payload a Home Assistant diagnostics download wants, and one that replays straight into the mock backend for a regression test. Identity comes along: the model register lives in `info`, which is polled like any other sub-system.

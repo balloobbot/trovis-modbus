@@ -159,6 +159,42 @@ async def test_full_update_consolidates_reads(
     assert all(event.count <= 50 for event in unit.read_events)
 
 
+async def test_readings_and_settings_poll_their_own_subsystems(
+    trovis: Trovis557x, unit: MockModbusUnit
+) -> None:
+    """Neither method reads a block the other one owns, and a full poll is both."""
+    await trovis.async_update()
+
+    unit.read_events.clear()
+    readings = await trovis.async_update_readings()
+    reading_blocks = [(e.register_type, e.address, e.count) for e in unit.read_events]
+
+    unit.read_events.clear()
+    settings = await trovis.async_update_settings()
+    setting_blocks = [(e.register_type, e.address, e.count) for e in unit.read_events]
+
+    assert not set(reading_blocks) & set(setting_blocks)
+    assert settings.updated == {"functions", "parameters"}
+    assert readings.updated == {
+        "info",
+        "controller",
+        "clock",
+        "sensors",
+        "rk1",
+        "rk2",
+        "rk3",
+        "rk4",
+        "buffer_tank",
+        "solar",
+    }
+
+    unit.read_events.clear()
+    await trovis.async_update()
+    assert [
+        (e.register_type, e.address, e.count) for e in unit.read_events
+    ] == reading_blocks + setting_blocks
+
+
 async def test_full_update_never_reads_across_an_unreadable_gap(
     trovis: Trovis557x, unit: MockModbusUnit
 ) -> None:

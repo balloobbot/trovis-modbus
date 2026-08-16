@@ -51,13 +51,11 @@ from .subsystems import (
 if TYPE_CHECKING:
     from modbus_connection import ModbusUnit
 
-# Every subsystem attribute a poll may refresh, in read order.
-_POLLED = (
+# What the controller measures and controls, in read order.
+_READINGS = (
     "info",
     "controller",
     "clock",
-    "functions",
-    "parameters",
     "sensors",
     "rk1",
     "rk2",
@@ -66,6 +64,11 @@ _POLLED = (
     "buffer_tank",
     "solar",
 )
+
+# What the controller was configured with: the CO/F selectors and the PA values
+# the library interprets the rest with. They change when someone reconfigures
+# the controller, not on their own.
+_SETTINGS = ("functions", "parameters")
 
 # Rk slots the model may not have; the rest are polled on every model.
 _CIRCUIT_SLOTS = ("rk1", "rk2", "rk3")
@@ -77,7 +80,8 @@ class UpdateReport:
 
     A failed subsystem kept its previous values and did not notify; the error
     that failed it rides along. A dead link is never in here — the update
-    raises ``ModbusConnectionError`` instead of reporting partial silence.
+    raises ``ModbusConnectionError`` instead of reporting partial silence. A
+    report names only what the method it came from polls.
     """
 
     updated: set[str]
@@ -175,7 +179,9 @@ class Trovis557x:
         )[:circuit_count]
 
         absent = frozenset(_CIRCUIT_SLOTS[circuit_count:])
-        self._polled = [name for name in _POLLED if name not in absent]
+        self._readings = [name for name in _READINGS if name not in absent]
+        self._settings = list(_SETTINGS)
+        self._polled = [*self._readings, *self._settings]
 
     @classmethod
     async def async_probe(cls, unit: ModbusUnit) -> TrovisProbe:
@@ -427,37 +433,70 @@ class Trovis557x:
         """Whether writing is enabled by the integration safety switch."""
         return self._writing_enabled
 
+    async def async_update_readings(self) -> UpdateReport:
+        """Refresh what the controller measures and controls.
+
+        Sensor inputs, control-circuit operating values, pump and valve states,
+        faults and the clock — everything that moves on its own.
+
+        The configuration this library interprets those with is *not* in here,
+        so a caller polling readings alone must call
+        :meth:`async_update_settings` at least once first: without it the
+        sensor-variant resolution and the heating-circuit control modes have
+        nothing to read and stay ``None``.
+        """
+        return await self._async_poll(self._readings, UpdateReport(set(), {}))
+
+    async def async_update_settings(self) -> UpdateReport:
+        """Refresh what the controller was configured with: CO/F and PA values.
+
+        These change when someone reconfigures the controller, not on their
+        own, so a caller polls them rarely — and again after a reconfiguration.
+        """
+        return await self._async_poll(self._settings, UpdateReport(set(), {}))
+
     async def async_update(self) -> UpdateReport:
-        """Refresh every active subsystem, one at a time.
+        """Refresh readings and settings together, in one report.
+
+        For a caller that does not want to schedule the two apart.
+        """
+        report = await self.async_update_readings()
+        return await self._async_poll(self._settings, report)
+
+    async def _async_poll(
+        self,
+        names: list[str],
+        report: UpdateReport,
+    ) -> UpdateReport:
+        """Read each subsystem on its own, adding what happened to ``report``.
 
         Subsystems are read independently: one whose block the controller
         refuses or answers too slowly keeps its previous values while the rest
-        still refresh. Listeners fire only after every subsystem has been
-        tried, and only on the ones that refreshed. A failure of the link
-        itself raises ``ModbusConnectionError`` instead of reporting, and a
-        timeout with nothing answered yet raises rather than walk a silent
+        still refresh. Listeners fire only after every subsystem of this poll
+        has been tried, and only on the ones that refreshed. A failure of the
+        link itself raises ``ModbusConnectionError`` instead of reporting, and
+        a timeout with nothing answered yet raises rather than walk a silent
         controller subsystem by subsystem.
         """
-        updated: set[str] = set()
-        failed: dict[str, ModbusError] = {}
-        for name in self._polled:
+        for name in names:
             component: Component = getattr(self, name)
             try:
                 await component.async_update(notify=False)
             except ModbusConnectionError:
                 raise
             except ModbusTimeoutError as err:
-                if not updated and not failed:
+                if not report.updated and not report.failed:
                     raise  # the first block timed out: assume the rest do too
-                failed[name] = err
+                report.failed[name] = err
             except ModbusError as err:
-                failed[name] = err
+                report.failed[name] = err
             else:
-                updated.add(name)
-        for name in updated:
-            fresh: Component = getattr(self, name)
-            fresh.notify()
-        return UpdateReport(updated, failed)
+                report.updated.add(name)
+        for name in names:
+            if name in report.updated:
+                fresh: Component = getattr(self, name)
+                fresh.notify()
+        return report
 
     async def async_read_raw(self) -> dict[str, dict[int, int | bool]]:
         """Every register this device reads, undecoded, for diagnostics.

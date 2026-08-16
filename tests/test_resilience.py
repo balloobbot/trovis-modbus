@@ -52,8 +52,14 @@ async def test_listeners_fire_at_the_end_and_only_for_fresh_subsystems(
     unit.read_events.clear()
     await trovis.async_update()
 
-    # One notification, after every sub-system was tried; none for the failure.
-    assert seen == [len(unit.read_events)]
+    # One notification, after every reading was tried; none for the failure. The
+    # settings poll that follows is its own, and does not hold it up.
+    settings_start = next(
+        index
+        for index, event in enumerate(unit.read_events)
+        if event.register_type == "coil" and event.address == 138
+    )
+    assert seen == [settings_start]
 
 
 async def test_one_circuit_failing_leaves_the_others_fresh(
@@ -85,6 +91,17 @@ async def test_a_silent_controller_raises_on_the_first_subsystem(
 
     with pytest.raises(ModbusTimeoutError):
         await trovis.async_update()
+
+
+async def test_a_settings_poll_of_a_silent_controller_raises(
+    trovis: Trovis557x, unit: MockModbusUnit
+) -> None:
+    """A settings poll carries no readings, so its own first block is the probe."""
+    await trovis.async_update()
+    unit.fail_read(138, ModbusTimeoutError("controller asleep"), register_type="coil")
+
+    with pytest.raises(ModbusTimeoutError):
+        await trovis.async_update_settings()
 
 
 async def test_a_refusal_on_the_first_subsystem_is_not_a_silent_controller(
