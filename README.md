@@ -58,7 +58,7 @@ await device.async_update_settings()  # at setup, and after a reconfiguration
 await device.async_update_readings()  # every cycle
 ```
 
-The settings are what the sensor-variant resolution and the heating-circuit control modes are derived from, so a caller that splits the two must run `async_update_settings()` at least once before those properties mean anything. Listeners fire at the end of the poll that read their sub-system, so a settings poll does not hold up the measurements, and a report names only what the method it came from polls.
+The settings are what the sensor-variant resolution and the heating-circuit control modes are derived from, so a caller that splits the two must run `async_update_settings()` at least once before those properties mean anything. Listeners fire once per update, at the end of the call: a settings poll fires its own sub-systems as it returns and does not hold up the measurements, while `async_update()` fires nothing until both of its polls have been tried. A report names only what the method it came from polls.
 
 ## Raw register dump
 

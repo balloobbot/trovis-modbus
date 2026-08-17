@@ -99,16 +99,15 @@ def test_values_lists_every_subsystem_field(mock_modbus_unit: MockModbusUnit) ->
         "fg3",
         "analog_input_voltage",
     } <= sensor_names
-    # field_rows() enumerates the component's public descriptor API. Logical
-    # views therefore remain visible here even when the current model excludes
-    # them from its instance-specific Modbus read layout.
+    # field_rows() lists what the component serves, so a logical view this
+    # model's read layout excludes is left out rather than shown empty.
     unsupported_sensor_views = {
         "ae1",
         "ae2",
         "ae3",
         "analog_input_current",
     }
-    assert unsupported_sensor_views <= sensor_names
+    assert unsupported_sensor_views.isdisjoint(sensor_names)
     assert unsupported_sensor_views.isdisjoint(device.sensors.readable_field_names)
     assert {
         "af1",
