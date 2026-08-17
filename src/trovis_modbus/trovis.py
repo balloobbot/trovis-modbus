@@ -445,7 +445,9 @@ class Trovis557x:
         sensor-variant resolution and the heating-circuit control modes have
         nothing to read and stay ``None``.
         """
-        return await self._async_poll(self._readings, UpdateReport(set(), {}))
+        report = await self._async_poll(self._readings, UpdateReport(set(), {}))
+        self._notify(report)
+        return report
 
     async def async_update_settings(self) -> UpdateReport:
         """Refresh what the controller was configured with: CO/F and PA values.
@@ -453,15 +455,19 @@ class Trovis557x:
         These change when someone reconfigures the controller, not on their
         own, so a caller polls them rarely — and again after a reconfiguration.
         """
-        return await self._async_poll(self._settings, UpdateReport(set(), {}))
+        report = await self._async_poll(self._settings, UpdateReport(set(), {}))
+        self._notify(report)
+        return report
 
     async def async_update(self) -> UpdateReport:
         """Refresh readings and settings together, in one report.
 
         For a caller that does not want to schedule the two apart.
         """
-        report = await self.async_update_readings()
-        return await self._async_poll(self._settings, report)
+        report = await self._async_poll(self._readings, UpdateReport(set(), {}))
+        await self._async_poll(self._settings, report)
+        self._notify(report)  # nothing fires until the whole cycle is done
+        return report
 
     async def _async_poll(
         self,
@@ -472,11 +478,11 @@ class Trovis557x:
 
         Subsystems are read independently: one whose block the controller
         refuses or answers too slowly keeps its previous values while the rest
-        still refresh. Listeners fire only after every subsystem of this poll
-        has been tried, and only on the ones that refreshed. A failure of the
-        link itself raises ``ModbusConnectionError`` instead of reporting, and
-        a timeout with nothing answered yet raises rather than walk a silent
-        controller subsystem by subsystem.
+        still refresh. A failure of the link itself raises
+        ``ModbusConnectionError`` instead of reporting, and a timeout with
+        nothing answered yet raises rather than walk a silent controller
+        subsystem by subsystem. Notifying is the caller's, so a full update
+        fires nothing until both of its polls are done.
         """
         for name in names:
             component: Component = getattr(self, name)
@@ -492,11 +498,17 @@ class Trovis557x:
                 report.failed[name] = err
             else:
                 report.updated.add(name)
-        for name in names:
+        return report
+
+    def _notify(self, report: UpdateReport) -> None:
+        """Fire the listeners of every subsystem this update refreshed.
+
+        Walked in poll order rather than the report's, which is a set.
+        """
+        for name in self._polled:
             if name in report.updated:
                 fresh: Component = getattr(self, name)
                 fresh.notify()
-        return report
 
     async def async_read_raw(self) -> dict[str, dict[int, int | bool]]:
         """Every register this device reads, undecoded, for diagnostics.

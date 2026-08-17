@@ -47,19 +47,19 @@ async def test_listeners_fire_at_the_end_and_only_for_fresh_subsystems(
     seen: list[int] = []
     trovis.rk1.add_update_listener(lambda: seen.append(len(unit.read_events)))
     trovis.sensors.add_update_listener(lambda: seen.append(-1))
+    settings_seen: list[int] = []
+    trovis.parameters.add_update_listener(
+        lambda: settings_seen.append(len(unit.read_events))
+    )
 
     unit.fail_read(12, ModbusTimeoutError("slow sensor block"))
     unit.read_events.clear()
     await trovis.async_update()
 
-    # One notification, after every reading was tried; none for the failure. The
-    # settings poll that follows is its own, and does not hold it up.
-    settings_start = next(
-        index
-        for index, event in enumerate(unit.read_events)
-        if event.register_type == "coil" and event.address == 138
-    )
-    assert seen == [settings_start]
+    # One notification each, after every subsystem of the whole cycle was tried,
+    # settings included; none for the failure, and none of them twice.
+    assert seen == [len(unit.read_events)]
+    assert settings_seen == [len(unit.read_events)]
 
 
 async def test_one_circuit_failing_leaves_the_others_fresh(
@@ -102,6 +102,21 @@ async def test_a_settings_poll_of_a_silent_controller_raises(
 
     with pytest.raises(ModbusTimeoutError):
         await trovis.async_update_settings()
+
+
+async def test_a_settings_poll_notifies_its_own_subsystems(
+    trovis: Trovis557x, unit: MockModbusUnit
+) -> None:
+    """A poll of one half still fires at the end of its own call."""
+    await trovis.async_update()
+    fired: list[str] = []
+    trovis.functions.add_update_listener(lambda: fired.append("functions"))
+    trovis.parameters.add_update_listener(lambda: fired.append("parameters"))
+    trovis.sensors.add_update_listener(lambda: fired.append("sensors"))
+
+    await trovis.async_update_settings()
+
+    assert fired == ["functions", "parameters"]
 
 
 async def test_a_refusal_on_the_first_subsystem_is_not_a_silent_controller(
